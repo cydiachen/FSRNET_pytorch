@@ -1,0 +1,131 @@
+import torch
+import torch.nn as nn
+
+
+class Net(torch.nn.Module):
+    def __init__(self, num_channels, base_filter, upscale_factor=1):
+        super(Net, self).__init__()
+        
+        # 这一部分的话实现的是Coarse SR network
+        self.layers1 = torch.nn.Sequential(
+            nn.Conv2d(in_channels=num_channels, out_channels=base_filter, kernel_size=3, stride=1, padding=1,
+                      bias=True),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+        )
+        
+        resnet_blocks = []
+        for _ in range(3):
+            resnet_blocks.append(ResnetBlock(64,kernel=3,stride=1,padding=1))
+        self.residual_layers1 = nn.Sequential(*resnet_blocks)
+
+        self.output_conv1 = nn.Conv2d(64,num_channels,kernel_size=3,stride=1,padding=1)
+
+        '''
+        self.layers2 = torch.nn.Sequential(
+            nn.Conv2d(in_channels=base_filter, out_channels=base_filter // 2, kernel_size=5, stride=1, padding=2,
+                      bias=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels=base_filter // 2, out_channels=num_channels * (upscale_factor ** 2), kernel_size=5, stride=1, padding=2,
+                      bias=True),
+            # nn.PixelShuffle很容易的适合实现sub-pixel convolution
+            nn.PixelShuffle(upscale_factor)
+        )
+        '''
+        
+        
+        # 这一部分的话实现的是Fine SR Encoder
+        self.layers2 = torch.nn.Sequential(
+            nn.Conv2d(in_channels=num_channels, out_channels=base_filter, kernel_size=3, stride=2, padding=1,
+                      bias=True),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+        )
+        
+        resnet_blocks = []
+        for _ in range(12):
+            resnet_blocks.append(ResnetBlock(base_filter,kernel=3,stride=1,padding=1))
+        self.residual_layers2 = nn.Sequential(*resnet_blocks)
+
+        self.output_conv2 = nn.Conv2d(base_filter,base_filter,kernel_size=3,stride=1,padding=0)
+
+        # 理论上来看的话，上面已经实现了Fine SR Encoder
+        # 下面的话就是通过一个Decoder来实现
+     
+        self.layers3 = torch.nn.Sequential(
+             nn.Conv2d(in_channels=base_filter, out_channels=base_filter, kernel_size=3, stride=1, padding=1,bias=True),
+             nn.BatchNorm2d(base_filter),
+             nn.ReLU(inplace=True),
+        )
+    
+        self.layers4 = torch.nn.Sequential(
+            nn.ConvTranspose2d(in_channels = base_filter ,out_channels = base_filter, kernel_size = 3, stride = 2,padding = 1 ),
+            nn.BatchNorm2d(base_filter),
+            nn.ReLU(inplace=True),
+        )
+        
+        resnet_blocks = []
+        for _ in range(3):
+            resnet_blocks.append(ResnetBlock(base_filter,kernel=3,stride=1,padding=1))
+        self.residual_layers3 = nn.Sequential(*resnet_blocks)
+        
+        self.output_conv3 = torch.nn.Sequential(nn.Conv2d(in_channels = base_filter, out_channels = num_channels, kernel_size = 3, stride = 1))
+        
+
+    def forward(self, x):
+        #coarse SR
+        x = self.layers1(x)
+
+        residual = x
+        x = self.residual_layers1(x)
+        x = torch.add(x,residual)
+    
+        x =self.output_conv1(x) 
+        
+        #Fine SR Encoder
+        x = self.layers2(x)
+        residual = x
+        x = self.residual_layers2(x)
+        x = torch.add(x,residual)
+
+        x = self.output_conv2(x)
+
+'''        #Fine SR Decoder
+        x = self.layers3(x)
+        x = self.layers4(x)
+        residual = x
+        x = self.residual_layers3(x)
+        x = torch.add(x,residual)
+'''
+
+	return x
+
+    def weight_init(self, mean, std):
+        for m in self._modules:
+            normal_init(self._modules[m], mean, std)
+
+
+def normal_init(m, mean, std):
+    if isinstance(m, nn.ConvTranspose2d) or isinstance(m, nn.Conv2d):
+        m.weight.data.normal_(mean, std)
+        m.bias.data.zero_()
+
+
+class ResnetBlock(nn.Module):
+    def __init__(self, num_channel, kernel=3, stride=1, padding=1):
+        super(ResnetBlock, self).__init__()
+        self.conv1 = nn.Conv2d(num_channel, num_channel, kernel, stride, padding)
+        self.conv2 = nn.Conv2d(num_channel, num_channel, kernel, stride, padding)
+        #self.bn = nn.BatchNorm2d(num_channel)
+        self.activation = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        residual = x
+        #x = self.bn(self.conv1(x)）
+        x = self.conv1(x)
+        #下一步需要看这个
+        x = self.activation(x)
+        #x = self.bn(self.conv2(x))
+        x = self.conv2(x)
+        x = torch.add(x, residual)
+        return x
