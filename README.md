@@ -25,6 +25,7 @@ Dataset Link: https://pan.baidu.com/s/1HEECUyKI5GOSrd7NPlm-ow  密码:z2ud
 
 ON GOING :| 
 PYTHON AND NOTEBOOK WILL BE PROVIDED.
+Pretrained Weights:链接:https://pan.baidu.com/s/1ZkgABGefsMjO6XhhvlBzRA  密码:libl
 
 ## Result
 
